@@ -22,10 +22,11 @@ j107, j201, j280, j326,
 resetting, rst, T2,
  x;
 
+    assert property (@(posedge dif_clk) ((dif_req ##[1:6] dif_gnt0) and (dif_req ##[1:9] dif_gnt1)) ##0 dif_gnt2);
+    assert property (@(posedge dif_clk) ((dif_req) and dif_req) ##0 dif_gnt2);
+    assert property (@(posedge dif_clk) ((dif_req ##5 dif_gnt0) and (dif_req ##8 dif_gnt1)) ##0 dif_gnt2);
 assert property (@ ( posedge j326) ( ( j239 && j327 && j347 ) throughout( $rose ( j327) ##44 j324[=2:$])) ##55 !j327);
 
-    //syntax assert property (@(posedge dif_clk) ((dif_req ##[1:6] dif_gnt0) and (dif_req ##[1:9] dif_gnt1)) ##0 dif_gnt2);
-    //syntax assert property (@(posedge dif_clk) ((dif_req ##5 dif_gnt0) and (dif_req ##8 dif_gnt1)) ##0 dif_gnt2);
     assert property (@(posedge dif_clk0) ##1 dif_out0 ##1 @(posedge dif_clk1) dif_out1);
     assert property (@(posedge clk) disable iff (~rst) out);
     assert property (@(posedge dif_clk) disable iff (dif_rst) dif_out);

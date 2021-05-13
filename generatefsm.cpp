@@ -18,7 +18,6 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
-
 #include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -37,6 +36,7 @@ static std::map<std::string, std::string> dataMap;
 static void dumpJson(const cJSON *arg, std::string &master, int depth);
 static void dumpSingle(const cJSON *p, std::string &master, int depth);
 static std::string getExprSingle(const cJSON *item);
+static std::string getProp(const cJSON *parent, const char *name);
 
 typedef struct {
     const char *name;
@@ -64,11 +64,13 @@ NameMap unaryMap[] = {
 NameMap binaryMap[] = {
     {"LogicalAnd", "&&"},
     {"BinaryAnd", "&"},
+    {"BinaryXor", "^"},
     {"LogicalOr", "||"},
     {"BinaryOr", "|"},
     {"Add", "+"},
     {"Subtract", "-"},
     {"Divide", "/"},
+    {"Multiply", "*"},
     {"Equality", "=="},
     {"CaseEquality", "=="},
     {"Inequality", "!="},
@@ -84,12 +86,13 @@ NameMap repMap[] = {
     {"GoTo", "->"},
     {nullptr, nullptr}};
 NameMap binaryPropMap[] = {
-    {"Implication", "|->"},
+    {"OverlappedImplication", "|->"},
+    {"NonOverlappedImplication", "|=>"},
+    {"OverlappedFollowedBy", "#-#"},
     {"Throughout", "throughout"},
     {"Intersect", "intersect"},
     {"Until", "until"},
     {"Within", "within"},
-    {"FollowedBy", "#-#"},
     {"Implies", "->"},
     {"Iff", "iff"},
     {"Until", "until"},
@@ -160,10 +163,15 @@ static bool getBool(const cJSON *parent, const char *name)
     return cJSON_IsTrue(getObject(parent, name));
 }
 
-static int getInteger(const cJSON *parent, const char *name)
+static std::string getInteger(const cJSON *parent, const char *name)
 {
     const cJSON *p = getObject(parent, name);
-    return p->valueint;
+    if (p->type & cJSON_Number)
+        return autostr(p->valueint);
+    if (p->type & cJSON_String)
+        return p->valuestring;
+printf("[%s:%d] ERROR %d\n", __FUNCTION__, __LINE__, p->type);
+    return "ERROR";
 }
 
 static std::string setDataMap(std::string temp, std::string base)
@@ -211,8 +219,6 @@ static std::string getExprSingle(const cJSON *item)
         val = getString(item, "op", unaryMap) + getExpr(item, "operand");
     else if (kind == "BinaryOp")
         val = getString(item, "op", binaryMap);
-    //else if (kind == "Binary")   ///////////////// TODO: typo????????????????????????
-        //val = getString(item, "op", binaryMap);
     else if (kind == "NamedValue")
         val = getStringSpace(item, "symbol");
     else if (kind == "StringLiteral")
@@ -245,6 +251,9 @@ static std::string getExprSingle(const cJSON *item)
 //printf("[%s:%d]val %s left %s righ %s kind %s op %s type %s\n", __FUNCTION__, __LINE__, val.c_str(), left.c_str(), right.c_str(), kind.c_str(), op.c_str(), type.c_str());
 //dumpJson(item,stdout, 0);
     }
+    else if (kind == "AssertionInstance") {
+        val = getProp(item, "body");
+    }
     if (val == "") {
         printf("[%s:%d] val %s left %s righ %s kind %s type %s\n", __FUNCTION__, __LINE__, val.c_str(), left.c_str(), right.c_str(), kind.c_str(), type.c_str());
         //dumpJson(item, stdout, 0);
@@ -253,6 +262,82 @@ static std::string getExprSingle(const cJSON *item)
     return left + " " + val + " " + right;
 }
 
+
+static std::string dumpTiming(const cJSON *p)
+{
+    std::string kind = getString(p, "kind");
+    if (kind != "SignalEvent")
+        printf("[%s:%d]KIND %s\n", __FUNCTION__, __LINE__, kind.c_str());
+    std::string edge = getString(p, "edge", edgeMap);
+    std::string expr = getExpr(p, "expr");
+    return "@(" + edge + " " + expr + ")";
+}
+
+static std::string getSignalEvent(const cJSON *p)
+{
+    return "@ (" + getString(p, "edge") + " " + getExpr(p, "expr") + ")";
+}
+
+static std::string getProp(const cJSON *parent, const char *name)
+{
+    const cJSON *p = getObject(parent, name);
+    std::string kind = getString(p, "kind");
+    std::string val;
+    if (kind == "Clocking") {
+        val = "CLOCKING" + getSignalEvent(getObject(p, "clocking")) + "(" + getProp(p, "expr") + ")";
+    }
+    else if (kind == "Simple")
+        val = getExpr(p, "expr");
+    else if (kind == "Binary") {
+        std::string op = getString(p, "op", binaryPropMap);
+        val = getProp(p, "left") + op + getProp(p, "right") + (endswith(op, ")") ? ")" : "");
+    }
+    else if (kind == "Unary") {
+        std::string op = getString(p, "op", unaryPropMap);
+        val = op + getProp(p, "expr");
+    }
+    else if (kind == "SequenceConcat") {
+        const cJSON *item = NULL;
+        bool tail = false;
+        val += "(";
+        cJSON_ArrayForEach(item, getObject(p, "elements")) {
+            std::string bkind = getString(item, "kind");
+            std::string max = getInteger(item, "max");
+            std::string min = getInteger(item, "min");
+            if (max != min)
+                val += "##[" + min + "," + max + "] ";
+            else if (tail || max != "0")
+                val += "##" + max + " ";
+            val += getProp(item, "sequence");
+            tail = true;
+        }
+        val += ")";
+    }
+    else if (kind == "StrongWeak") {
+        std::string op = getString(p, "strength");
+        val = op + "(" + getProp(p, "expr") + ")";
+    }
+    else if (kind == "Instance") {
+        val = getProp(p, "expanded");
+    }
+    else {
+        dumpSingle(p, val, 0);
+printf("[%s:%d]ERROROROROROR kind %s val '%s'\n", __FUNCTION__, __LINE__, kind.c_str(), val.c_str());
+val += "ERRROROROROR\n";
+    }
+    if (const cJSON *rep = getObject(p, "repetition")) {
+        std::string max = getInteger(rep, "max");
+        std::string min = getInteger(rep, "min");
+        val += "[" + getString(rep, "kind", repMap);
+        if (max != min)
+            val += min + "," + max;
+        else if (max != "0")
+            val += max;
+        val += "] ";
+    }
+    return val;
+}
+
 static void processBlock(std::string startString, const cJSON *p, std::string &master, int depth)
 {
     std::string kind = getString(p, "kind");
@@ -289,6 +374,19 @@ static void processBlock(std::string startString, const cJSON *p, std::string &m
                 processBlock("", getObject(item, "stmt"), master, depth+1);
             }
             master += "ENDCASE\n";
+        }
+        else if (kind == "ConcurrentAssertion")
+            master += "    assert property (" + getProp(p, "propertySpec") + ");\n";
+        else if (kind == "ImmediateAssertion")
+            master += "    assert (" + getExpr(p, "cond") + ");\n";
+                      //"ifTrue": {
+                        //"kind": "Empty"
+                      //},
+                      //"assertionKind": "Assert",
+                      //"isDeferred": false,
+                      //"isFinal": false
+        else {
+printf("[%s:%d] BLOCKERRRRRR %s\n", __FUNCTION__, __LINE__, kind.c_str());
         }
     }
     if (startString != "") {
@@ -386,75 +484,6 @@ static std::string setDefinition(const cJSON *arg)
     }
     //dumpJson(arg->child, master, 0);
     return setDataMap(defineType + master + "end" + defineType + "\n", objectName);
-}
-
-static std::string dumpTiming(const cJSON *p)
-{
-    std::string kind = getString(p, "kind");
-    if (kind != "SignalEvent")
-        printf("[%s:%d]KIND %s\n", __FUNCTION__, __LINE__, kind.c_str());
-    std::string edge = getString(p, "edge", edgeMap);
-    std::string expr = getExpr(p, "expr");
-    return "@(" + edge + " " + expr + ")";
-}
-
-static std::string getSignalEvent(const cJSON *p)
-{
-    return "@ (" + getString(p, "edge") + " " + getExpr(p, "expr") + ")";
-}
-
-static std::string getProp(const cJSON *parent, const char *name)
-{
-    const cJSON *p = getObject(parent, name);
-    std::string kind = getString(p, "kind");
-    std::string val;
-    if (kind == "Clocking") {
-        val = "CLOCKING" + getSignalEvent(getObject(p, "clocking")) + "(" + getProp(p, "expr") + ")";
-    }
-    else if (kind == "Simple")
-        val = getExpr(p, "expr");
-    else if (kind == "Binary") {
-        std::string op = getString(p, "op", binaryPropMap);
-        val = getProp(p, "left") + op + getProp(p, "right") + (endswith(op, ")") ? ")" : "");
-    }
-    else if (kind == "Unary") {
-        std::string op = getString(p, "op", unaryPropMap);
-        val = op + getProp(p, "expr");
-    }
-    else if (kind == "SequenceConcat") {
-        const cJSON *item = NULL;
-        bool tail = false;
-        cJSON_ArrayForEach(item, getObject(p, "elements")) {
-            std::string bkind = getString(item, "kind");
-            int max = getInteger(item, "max");
-            int min = getInteger(item, "min");
-            if (max != min)
-                val += "##[" + autostr(min) + "," + autostr(max) + "] ";
-            else if (tail || max)
-                val += "##" + autostr(max) + " ";
-            val += getProp(item, "sequence");
-            tail = true;
-        }
-    }
-    else if (kind == "StrongWeak") {
-        std::string op = getString(p, "strength");
-        val = op + "(" + getProp(p, "expr") + ")";
-    }
-    else {
-        dumpSingle(p, val, 0);
-printf("[%s:%d]ERROROROROROR '%s'\n", __FUNCTION__, __LINE__, val.c_str());
-    }
-    if (const cJSON *rep = getObject(p, "repetition")) {
-        int max = getInteger(rep, "max");
-        int min = getInteger(rep, "min");
-        val += "[" + getString(rep, "kind", repMap);
-        if (max != min)
-            val += autostr(min) + "," + autostr(max);
-        else if (max)
-            val += autostr(max);
-        val += "] ";
-    }
-    return val;
 }
 
 static void dumpSingle(const cJSON *p, std::string &master, int depth)
@@ -560,19 +589,21 @@ master += "INSTT " + name + " kind=" + getString(pnext, "kind") + " type=" + aut
                 master += "always " + getSignalEvent(p) + "\n";
             else if (kind == "ProceduralBlock") {
                 const cJSON *body = getObject(p, "body");
-                std::string type = getString(p, "procedureKind", procKindMap);
                 std::string bkind = getString(body, "kind");
                 if (bkind == "ConcurrentAssertion")
                     master += "    assert property (" + getProp(body, "propertySpec") + ");\n";
-                else if (bkind != "Timed")
-                    master += "BKIND=" + bkind + "\n";
-                master += type;
-                if (const cJSON *timing = getObject(body, "timing"))
-                    master += " " + dumpTiming(timing);
-                master += " begin\n";
-                if (const cJSON *stmt = getObject(body, "stmt"))
-                    processBlock("", stmt, master, depth);
-                master += "    end;\n";
+                else {
+                    std::string type = getString(p, "procedureKind", procKindMap);
+                    if (bkind != "Timed")
+                        master += "BKIND=" + bkind + "\n";
+                    master += type;
+                    if (const cJSON *timing = getObject(body, "timing"))
+                        master += " " + dumpTiming(timing);
+                    master += " begin\n";
+                    if (const cJSON *stmt = getObject(body, "stmt"))
+                        processBlock("", stmt, master, depth);
+                    master += "    end;\n";
+                }
             }
             else if (kind == "CompilationUnit") {
                 const cJSON *item = NULL;
