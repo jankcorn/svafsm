@@ -23,6 +23,7 @@
 #include <unistd.h>
 #include <string>
 #include <map>
+#include "common.h"
 
 #if 0
 Concatenate(Al, Ar)

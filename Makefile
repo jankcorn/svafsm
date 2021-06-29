@@ -1,7 +1,9 @@
 
-CFLAGS= -g -Wall -I../cJSON
+JSONDIR=../cJSON
 
-SOURCES = generatefsm.cpp atomiccAssert.cpp
+CFLAGS= -g -Wall -I$(JSONDIR)
+
+SOURCES = generatefsm.cpp atomiccAssert.cpp $(JSONDIR)/cJSON.c
 
 all: $(OBJS)
 	g++ $(CFLAGS) $(SOURCES)

@@ -21,27 +21,19 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <string.h>
 #include <string>
 #include <map>
-
-#include "cJSON.c"
-
-#define BUFFER_LENGTH 20000000
-#define getObject cJSON_GetObjectItemCaseSensitive
+#include "common.h"
 
 static char buffer[BUFFER_LENGTH];
 static FILE *outfile;
 static std::map<std::string, std::string> dataMap;
 
-static void dumpJson(const cJSON *arg, std::string &master, int depth);
-static void dumpSingle(const cJSON *p, std::string &master, int depth);
-static std::string getExprSingle(const cJSON *item);
-static std::string getProp(const cJSON *parent, const char *name);
-
-typedef struct {
-    const char *name;
-    const char *value;
-} NameMap;
+void dumpJson(const cJSON *arg, std::string &master, int depth);
+void dumpSingle(const cJSON *p, std::string &master, int depth);
+std::string getExprSingle(const cJSON *item);
+std::string getProp(const cJSON *parent, const char *name);
 
 NameMap dirMap[] = {
     {"In", "input"},
@@ -106,7 +98,7 @@ NameMap unaryPropMap[] = {
 
 extern "C" void jca(){}
 
-static inline std::string autostr(uint64_t X, bool isNeg = false)
+std::string autostr(uint64_t X, bool isNeg)
 {
     char Buffer[21];
     char *BufPtr = std::end(Buffer);
@@ -121,17 +113,17 @@ static inline std::string autostr(uint64_t X, bool isNeg = false)
     if (isNeg) *--BufPtr = '-';   // Add negative sign...
     return std::string(BufPtr, std::end(Buffer));
 }
-static bool inline startswith(std::string str, std::string suffix)
+bool startswith(std::string str, std::string suffix)
 {
     return str.substr(0, suffix.length()) == suffix;
 }
-static bool inline endswith(std::string str, std::string suffix)
+bool endswith(std::string str, std::string suffix)
 {
     int skipl = str.length() - suffix.length();
     return skipl >= 0 && str.substr(skipl) == suffix;
 }
 
-static std::string getString(const cJSON *arg, const char *name, NameMap *map = nullptr)
+std::string getString(const cJSON *arg, const char *name, NameMap *map)
 {
     cJSON *item = getObject(arg, name);
     std::string val;
@@ -149,7 +141,7 @@ printf("[%s:%d] NAMEMAP %s fail %s\n", __FUNCTION__, __LINE__, (map-1)->name, va
     return val;
 }
 
-static std::string getStringSpace(const cJSON *arg, const char *name)
+std::string getStringSpace(const cJSON *arg, const char *name)
 {
     std::string val = getString(arg, name);
     int ind = val.find(" ");
@@ -158,12 +150,12 @@ static std::string getStringSpace(const cJSON *arg, const char *name)
     return val;
 }
 
-static bool getBool(const cJSON *parent, const char *name)
+bool getBool(const cJSON *parent, const char *name)
 {
     return cJSON_IsTrue(getObject(parent, name));
 }
 
-static std::string getInteger(const cJSON *parent, const char *name)
+std::string getInteger(const cJSON *parent, const char *name)
 {
     const cJSON *p = getObject(parent, name);
     if (p->type & cJSON_Number)
@@ -174,7 +166,7 @@ printf("[%s:%d] ERROR %d\n", __FUNCTION__, __LINE__, p->type);
     return "ERROR";
 }
 
-static std::string setDataMap(std::string temp, std::string base)
+std::string setDataMap(std::string temp, std::string base)
 {
     auto item = dataMap.find(temp);
     if (item != dataMap.end())
@@ -184,11 +176,11 @@ static std::string setDataMap(std::string temp, std::string base)
     return base;
 }
 
-static std::string getExpr(const cJSON *parent, const char *name)
+std::string getExpr(const cJSON *parent, const char *name)
 {
     return getExprSingle(getObject(parent, name));
 }
-static std::string getExprArray(const cJSON *parent, const char *name)
+std::string getExprArray(const cJSON *parent, const char *name)
 {
     std::string master, sep;
     const cJSON *expr = NULL;
@@ -198,7 +190,7 @@ static std::string getExprArray(const cJSON *parent, const char *name)
     }
     return master;
 }
-static std::string getExprSingle(const cJSON *item)
+std::string getExprSingle(const cJSON *item)
 {
     if (!item)
         return "";
@@ -261,9 +253,8 @@ static std::string getExprSingle(const cJSON *item)
     }
     return left + " " + val + " " + right;
 }
-
 
-static std::string dumpTiming(const cJSON *p)
+std::string dumpTiming(const cJSON *p)
 {
     std::string kind = getString(p, "kind");
     if (kind != "SignalEvent")
@@ -273,12 +264,12 @@ static std::string dumpTiming(const cJSON *p)
     return "@(" + edge + " " + expr + ")";
 }
 
-static std::string getSignalEvent(const cJSON *p)
+std::string getSignalEvent(const cJSON *p)
 {
     return "@ (" + getString(p, "edge") + " " + getExpr(p, "expr") + ")";
 }
 
-static std::string getProp(const cJSON *parent, const char *name)
+std::string getProp(const cJSON *parent, const char *name)
 {
     const cJSON *p = getObject(parent, name);
     std::string kind = getString(p, "kind");
@@ -338,7 +329,7 @@ val += "ERRROROROROR\n";
     return val;
 }
 
-static void processBlock(std::string startString, const cJSON *p, std::string &master, int depth)
+void processBlock(std::string startString, const cJSON *p, std::string &master, int depth)
 {
     std::string kind = getString(p, "kind");
     if (!p || kind == "Empty")
@@ -395,8 +386,8 @@ printf("[%s:%d] BLOCKERRRRRR %s\n", __FUNCTION__, __LINE__, kind.c_str());
         master += "end\n";
     }
 }
-
-static std::string setDefinition(const cJSON *arg)
+
+std::string setDefinition(const cJSON *arg)
 {
     std::string master, val, sep;
     std::string objectName = getString(arg, "definition");
@@ -486,7 +477,7 @@ static std::string setDefinition(const cJSON *arg)
     return setDataMap(defineType + master + "end" + defineType + "\n", objectName);
 }
 
-static void dumpSingle(const cJSON *p, std::string &master, int depth)
+void dumpSingle(const cJSON *p, std::string &master, int depth)
 {
         int type = p->type;
         std::string name, vstring;
@@ -642,7 +633,7 @@ master += "INSTT " + name + " kind=" + getString(pnext, "kind") + " type=" + aut
         }
 }
 
-static void dumpJson(const cJSON *arg, std::string &master, int depth)
+void dumpJson(const cJSON *arg, std::string &master, int depth)
 {
     const cJSON *pnext = arg;
     while (pnext) {
