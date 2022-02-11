@@ -87,7 +87,6 @@ NameMap binaryPropMap[] = {
     {"Within", "within"},
     {"Implies", "->"},
     {"Iff", "iff"},
-    {"Until", "until"},
     {"And", "&&"},
     {"Or", "||"},
     {nullptr, nullptr}};
@@ -190,6 +189,42 @@ std::string getExprArray(const cJSON *parent, const char *name)
     }
     return master;
 }
+std::string seqConcat(const cJSON *p)
+{
+        const cJSON *item = NULL;
+        bool tail = false;
+        std::string val = "(";
+        cJSON_ArrayForEach(item, getObject(p, "elements")) {
+            std::string bkind = getString(item, "kind");
+            std::string max = getInteger(item, "max");
+            std::string min = getInteger(item, "min");
+            if (max != min)
+                val += "##[" + min + "," + max + "] ";
+            else if (tail || max != "0")
+                val += "##" + max + " ";
+            val += getProp(item, "sequence");
+            tail = true;
+        }
+        val += ")";
+    return val;
+}
+
+std::string getRepetition(const cJSON *p)
+{
+    std::string val;
+    if (const cJSON *rep = getObject(p, "repetition")) {
+        std::string max = getInteger(rep, "max");
+        std::string min = getInteger(rep, "min");
+        val += "[" + getString(rep, "kind", repMap);
+        if (max != min)
+            val += min + "," + max;
+        else if (max != "0")
+            val += max;
+        val += "] ";
+    }
+    return val;
+}
+
 std::string getExprSingle(const cJSON *item)
 {
     if (!item)
@@ -211,6 +246,12 @@ std::string getExprSingle(const cJSON *item)
         val = getString(item, "op", unaryMap) + getExpr(item, "operand");
     else if (kind == "BinaryOp")
         val = getString(item, "op", binaryMap);
+    else if (kind == "Binary")
+        val = getString(item, "op", binaryPropMap);
+    else if (kind == "Unary") {
+        std::string op = getString(item, "op", unaryPropMap);
+        val = op + getProp(item, "expr");
+    }
     else if (kind == "NamedValue")
         val = getStringSpace(item, "symbol");
     else if (kind == "StringLiteral")
@@ -246,12 +287,32 @@ std::string getExprSingle(const cJSON *item)
     else if (kind == "AssertionInstance") {
         val = getProp(item, "body");
     }
+    else if (kind == "Simple") {
+        val = getExpr(item, "expr");
+        val += getRepetition(item);
+    }
+    else if (kind == "Clocking") {
+        val = getProp(item, "expr");
+    }
+    else if (kind == "StrongWeak") {
+        val = "strong" + getProp(item, "expr");
+    }
+    else if (kind == "SequenceConcat") {
+        val = seqConcat(item);
+    }
     if (val == "") {
         printf("[%s:%d] val %s left %s righ %s kind %s type %s\n", __FUNCTION__, __LINE__, val.c_str(), left.c_str(), right.c_str(), kind.c_str(), type.c_str());
-        //dumpJson(item, stdout, 0);
+std::string dumpVal;
+        dumpJson(item, dumpVal, 0);
+printf("[%s:%d] dumpVal '%s'\n", __FUNCTION__, __LINE__, dumpVal.c_str());
         exit(-1);
     }
     return left + " " + val + " " + right;
+}
+
+std::string getSignalEvent(const cJSON *p)
+{
+    return "@ (" + getString(p, "edge", edgeMap) + " " + getExpr(p, "expr") + ")";
 }
 
 std::string dumpTiming(const cJSON *p)
@@ -264,21 +325,17 @@ std::string dumpTiming(const cJSON *p)
     return "@(" + edge + " " + expr + ")";
 }
 
-std::string getSignalEvent(const cJSON *p)
-{
-    return "@ (" + getString(p, "edge") + " " + getExpr(p, "expr") + ")";
-}
-
 std::string getProp(const cJSON *parent, const char *name)
 {
     const cJSON *p = getObject(parent, name);
     std::string kind = getString(p, "kind");
     std::string val;
     if (kind == "Clocking") {
-        val = "CLOCKING" + getSignalEvent(getObject(p, "clocking")) + "(" + getProp(p, "expr") + ")";
+        val = getSignalEvent(getObject(p, "clocking")) + getProp(p, "expr");
     }
-    else if (kind == "Simple")
+    else if (kind == "Simple") {
         val = getExpr(p, "expr");
+    }
     else if (kind == "Binary") {
         std::string op = getString(p, "op", binaryPropMap);
         val = getProp(p, "left") + op + getProp(p, "right") + (endswith(op, ")") ? ")" : "");
@@ -288,21 +345,7 @@ std::string getProp(const cJSON *parent, const char *name)
         val = op + getProp(p, "expr");
     }
     else if (kind == "SequenceConcat") {
-        const cJSON *item = NULL;
-        bool tail = false;
-        val += "(";
-        cJSON_ArrayForEach(item, getObject(p, "elements")) {
-            std::string bkind = getString(item, "kind");
-            std::string max = getInteger(item, "max");
-            std::string min = getInteger(item, "min");
-            if (max != min)
-                val += "##[" + min + "," + max + "] ";
-            else if (tail || max != "0")
-                val += "##" + max + " ";
-            val += getProp(item, "sequence");
-            tail = true;
-        }
-        val += ")";
+        val = seqConcat(p);
     }
     else if (kind == "StrongWeak") {
         std::string op = getString(p, "strength");
@@ -311,21 +354,16 @@ std::string getProp(const cJSON *parent, const char *name)
     else if (kind == "Instance") {
         val = getProp(p, "expanded");
     }
+    else if (kind == "DisableIff") {
+        val = "disable iff (" + getExpr(p, "condition") + ") " + getExpr(p, "expr");
+    }
     else {
         dumpSingle(p, val, 0);
 printf("[%s:%d]ERROROROROROR kind %s val '%s'\n", __FUNCTION__, __LINE__, kind.c_str(), val.c_str());
+exit(-1);
 val += "ERRROROROROR\n";
     }
-    if (const cJSON *rep = getObject(p, "repetition")) {
-        std::string max = getInteger(rep, "max");
-        std::string min = getInteger(rep, "min");
-        val += "[" + getString(rep, "kind", repMap);
-        if (max != min)
-            val += min + "," + max;
-        else if (max != "0")
-            val += max;
-        val += "] ";
-    }
+    val += getRepetition(p);
     return val;
 }
 
