@@ -87,7 +87,7 @@ NameMap binaryPropMap[] = {
     {"Within", "within"},
     {"Implies", "->"},
     {"Iff", "iff"},
-    {"And", "&&"},
+    {"And", "and"},
     {"Or", "||"},
     {nullptr, nullptr}};
 NameMap unaryPropMap[] = {
@@ -249,8 +249,7 @@ std::string getExprSingle(const cJSON *item)
     else if (kind == "Binary")
         val = getString(item, "op", binaryPropMap);
     else if (kind == "Unary") {
-        std::string op = getString(item, "op", unaryPropMap);
-        val = op + getProp(item, "expr");
+        val = getString(item, "op", unaryPropMap) + getProp(item, "expr");
     }
     else if (kind == "NamedValue")
         val = getStringSpace(item, "symbol");
@@ -307,12 +306,16 @@ std::string dumpVal;
 printf("[%s:%d] dumpVal '%s'\n", __FUNCTION__, __LINE__, dumpVal.c_str());
         exit(-1);
     }
+    if (left != "" || right != "") {
+        left = "(" + left;
+        right = right + ")";
+    }
     return left + " " + val + " " + right;
 }
 
 std::string getSignalEvent(const cJSON *p)
 {
-    return "@ (" + getString(p, "edge", edgeMap) + " " + getExpr(p, "expr") + ")";
+    return "@(" + getString(p, "edge", edgeMap) + " " + getExpr(p, "expr") + ")";
 }
 
 std::string dumpTiming(const cJSON *p)
@@ -320,9 +323,7 @@ std::string dumpTiming(const cJSON *p)
     std::string kind = getString(p, "kind");
     if (kind != "SignalEvent")
         printf("[%s:%d]KIND %s\n", __FUNCTION__, __LINE__, kind.c_str());
-    std::string edge = getString(p, "edge", edgeMap);
-    std::string expr = getExpr(p, "expr");
-    return "@(" + edge + " " + expr + ")";
+    return getSignalEvent(p);
 }
 
 std::string getProp(const cJSON *parent, const char *name)
@@ -331,31 +332,29 @@ std::string getProp(const cJSON *parent, const char *name)
     std::string kind = getString(p, "kind");
     std::string val;
     if (kind == "Clocking") {
-        val = getSignalEvent(getObject(p, "clocking")) + getProp(p, "expr");
+        val = "(" + getSignalEvent(getObject(p, "clocking")) + getProp(p, "expr") + ")";
     }
     else if (kind == "Simple") {
         val = getExpr(p, "expr");
     }
     else if (kind == "Binary") {
         std::string op = getString(p, "op", binaryPropMap);
-        val = getProp(p, "left") + op + getProp(p, "right") + (endswith(op, ")") ? ")" : "");
+        val = "(" + getProp(p, "left") + op + getProp(p, "right") + (endswith(op, ")") ? "))" : ")");
     }
     else if (kind == "Unary") {
-        std::string op = getString(p, "op", unaryPropMap);
-        val = op + getProp(p, "expr");
+        val = "(" + getString(p, "op", unaryPropMap) + getProp(p, "expr") + ")";
     }
     else if (kind == "SequenceConcat") {
         val = seqConcat(p);
     }
     else if (kind == "StrongWeak") {
-        std::string op = getString(p, "strength");
-        val = op + "(" + getProp(p, "expr") + ")";
+        val = getString(p, "strength") + "(" + getProp(p, "expr") + ")";
     }
     else if (kind == "Instance") {
         val = getProp(p, "expanded");
     }
     else if (kind == "DisableIff") {
-        val = "disable iff (" + getExpr(p, "condition") + ") " + getExpr(p, "expr");
+        val = " disable iff (" + getExpr(p, "condition") + ") (" + getExpr(p, "expr") + ")";
     }
     else {
         dumpSingle(p, val, 0);
@@ -405,7 +404,7 @@ void processBlock(std::string startString, const cJSON *p, std::string &master, 
             master += "ENDCASE\n";
         }
         else if (kind == "ConcurrentAssertion")
-            master += "    assert property (" + getProp(p, "propertySpec") + ");\n";
+            master += "    assert property " + getProp(p, "propertySpec") + ";\n";
         else if (kind == "ImmediateAssertion")
             master += "    assert (" + getExpr(p, "cond") + ");\n";
                       //"ifTrue": {
@@ -614,13 +613,12 @@ master += "INSTT " + name + " kind=" + getString(pnext, "kind") + " type=" + aut
             else if (kind == "Block")
                 processBlock("", p, master, depth);
             else if (kind == "SignalEvent")
-                //master += "always @ " + getString(p, "edge") + " " + getExpr(p, "expr") + "\n";
                 master += "always " + getSignalEvent(p) + "\n";
             else if (kind == "ProceduralBlock") {
                 const cJSON *body = getObject(p, "body");
                 std::string bkind = getString(body, "kind");
                 if (bkind == "ConcurrentAssertion")
-                    master += "    assert property (" + getProp(body, "propertySpec") + ");\n";
+                    master += "    assert property " + getProp(body, "propertySpec") + ";\n";
                 else {
                     std::string type = getString(p, "procedureKind", procKindMap);
                     if (bkind != "Timed")
