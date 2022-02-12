@@ -43,6 +43,7 @@ NameMap dirMap[] = {
 NameMap edgeMap[] = {
     {"PosEdge", "posedge"},
     {"NegEdge", "negedge"},
+    {"None", ""},
     {nullptr, nullptr}};
 NameMap procKindMap[] = {
     {"Always", "always"},
@@ -134,7 +135,7 @@ std::string getString(const cJSON *arg, const char *name, NameMap *map)
                     return map->value;
                 map++;
             }
-printf("[%s:%d] NAMEMAP %s fail %s\n", __FUNCTION__, __LINE__, (map-1)->name, val.c_str());
+printf("[%s:%d] NAMEMAP '%s' fail '%s'\n", __FUNCTION__, __LINE__, (map-1)->name, val.c_str());
         }
     }
     return val;
@@ -316,14 +317,6 @@ printf("[%s:%d] dumpVal '%s'\n", __FUNCTION__, __LINE__, dumpVal.c_str());
 std::string getSignalEvent(const cJSON *p)
 {
     return "@(" + getString(p, "edge", edgeMap) + " " + getExpr(p, "expr") + ")";
-}
-
-std::string dumpTiming(const cJSON *p)
-{
-    std::string kind = getString(p, "kind");
-    if (kind != "SignalEvent")
-        printf("[%s:%d]KIND %s\n", __FUNCTION__, __LINE__, kind.c_str());
-    return getSignalEvent(p);
 }
 
 std::string getProp(const cJSON *parent, const char *name)
@@ -624,8 +617,12 @@ master += "INSTT " + name + " kind=" + getString(pnext, "kind") + " type=" + aut
                     if (bkind != "Timed")
                         master += "BKIND=" + bkind + "\n";
                     master += type;
-                    if (const cJSON *timing = getObject(body, "timing"))
-                        master += " " + dumpTiming(timing);
+                    if (const cJSON *timing = getObject(body, "timing")) {
+                        std::string kind = getString(timing, "kind");
+                        if (kind != "SignalEvent")
+                            printf("[%s:%d]KIND %s\n", __FUNCTION__, __LINE__, kind.c_str());
+                        master += " " + getSignalEvent(timing);
+                    }
                     master += " begin\n";
                     if (const cJSON *stmt = getObject(body, "stmt"))
                         processBlock("", stmt, master, depth);
