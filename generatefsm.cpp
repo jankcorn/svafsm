@@ -247,17 +247,10 @@ std::string getExprSingle(const cJSON *item)
         val = getString(item, "op", unaryMap) + getExpr(item, "operand");
     else if (kind == "BinaryOp")
         val = getString(item, "op", binaryMap);
-    else if (kind == "Binary")
-        val = getString(item, "op", binaryPropMap);
-    else if (kind == "Unary") {
-        val = getString(item, "op", unaryPropMap) + getProp(item, "expr");
-    }
     else if (kind == "NamedValue")
         val = getStringSpace(item, "symbol");
     else if (kind == "StringLiteral")
         val = "\"" + getStringSpace(item, "literal") + "\"";
-    else if (kind == "Concatenation")
-        return "{" + getExprArray(item, "operands") + "}";
     else if (kind == "Conversion") {
         auto *op = getObject(item, "operand");
         std::string type = getString(item, "type");
@@ -287,19 +280,6 @@ std::string getExprSingle(const cJSON *item)
     else if (kind == "AssertionInstance") {
         val = getProp(item, "body");
     }
-    else if (kind == "Simple") {
-        val = getExpr(item, "expr");
-        val += getRepetition(item);
-    }
-    else if (kind == "Clocking") {
-        val = getProp(item, "expr");
-    }
-    else if (kind == "StrongWeak") {
-        val = "strong" + getProp(item, "expr");
-    }
-    else if (kind == "SequenceConcat") {
-        val = seqConcat(item);
-    }
     if (val == "") {
         printf("[%s:%d] val %s left %s righ %s kind %s type %s\n", __FUNCTION__, __LINE__, val.c_str(), left.c_str(), right.c_str(), kind.c_str(), type.c_str());
 std::string dumpVal;
@@ -307,11 +287,7 @@ std::string dumpVal;
 printf("[%s:%d] dumpVal '%s'\n", __FUNCTION__, __LINE__, dumpVal.c_str());
         exit(-1);
     }
-    if (left != "" || right != "") {
-        left = "(" + left;
-        right = right + ")";
-    }
-    return left + " " + val + " " + right;
+    return "(" + left + " " + val + " " + right + ")";
 }
 
 std::string getSignalEvent(const cJSON *p)
@@ -341,13 +317,14 @@ std::string getProp(const cJSON *parent, const char *name)
         val = seqConcat(p);
     }
     else if (kind == "StrongWeak") {
-        val = getString(p, "strength") + "(" + getProp(p, "expr") + ")";
+        val = getString(p, "strength") + getProp(p, "expr");
     }
     else if (kind == "Instance") {
         val = getProp(p, "expanded");
     }
     else if (kind == "DisableIff") {
-        val = " disable iff (" + getExpr(p, "condition") + ") (" + getExpr(p, "expr") + ")";
+        //val = " disable iff (" + getExpr(p, "condition") + ") (" + getExpr(p, "expr") + ")";
+        val = " disable iff (" + getExpr(p, "condition") + ") (" + getProp(p, "expr") + ")";
     }
     else {
         dumpSingle(p, val, 0);
